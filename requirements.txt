@@ -1,0 +1,9 @@
+tensorflow==2.15.0
+numpy==1.26.4
+scikit-learn==1.5.2
+flask==3.0.0
+pandas==2.1.4
+nltk==3.8.1
+fuzzywuzzy==0.18.0
+python-Levenshtein==0.23.0
+gunicorn==21.2.0
