@@ -23,8 +23,11 @@ app = Flask(__name__)
 
 # ---------------- Load Data ----------------
 bus_data = pd.read_csv("surat_bus.csv")
-df2 = pd.read_csv("surat_bus.csv")
 df = pd.read_csv("SURAT5.csv")
+
+# Pre-convert stop names to clean, lowercase strings to prevent NaN crashes on startup
+df["originStopName"] = df["originStopName"].dropna().astype(str).str.lower().str.strip()
+df["destinationStopName"] = df["destinationStopName"].dropna().astype(str).str.lower().str.strip()
 
 lemmatizer = WordNetLemmatizer()
 
@@ -38,16 +41,13 @@ with open("fare_prediction_model.pkl", "rb") as file:
 
 # ---------------- Fare Prediction ----------------
 def predict_fare(origin, destination):
-    data = pd.read_csv("SURAT5.csv")
-    data["originStopName"] = data["originStopName"].str.lower().str.strip()
-    data["destinationStopName"] = data["destinationStopName"].str.lower().str.strip()
-
     origin = origin.lower().strip()
     destination = destination.lower().strip()
 
-    row = data[
-        (data["originStopName"] == origin) &
-        (data["destinationStopName"] == destination)
+    # Query directly from pre-loaded and sanitized df in memory to save disk I/O
+    row = df[
+        (df["originStopName"] == origin) &
+        (df["destinationStopName"] == destination)
     ]
 
     if not row.empty:
@@ -82,8 +82,8 @@ def predict_class(sentence):
 
 # ---------------- Stop Matching ----------------
 combined_list = (
-    df["originStopName"].str.lower().tolist() +
-    df["destinationStopName"].str.lower().tolist()
+    df["originStopName"].tolist() +
+    df["destinationStopName"].tolist()
 )
 
 def extract_origin_destination(message):
@@ -92,8 +92,13 @@ def extract_origin_destination(message):
         return None, None
 
     origin, destination = match.groups()
-    o = process.extractOne(origin, combined_list)
-    d = process.extractOne(destination, combined_list)
+    origin = origin.strip()
+    destination = destination.strip()
+    if not origin or not destination:
+        return None, None
+
+    o = process.extractOne(origin, combined_list) if origin else None
+    d = process.extractOne(destination, combined_list) if destination else None
 
     return o[0] if o and o[1] > 80 else None, d[0] if d and d[1] > 80 else None
 
@@ -114,25 +119,27 @@ def get_response(message):
     if tag == "fare":
         origin, destination = extract_origin_destination(message)
         if not origin or not destination:
-            return "Please use format: fare from A to B"
+            return "Please specify the starting and destination stops (e.g., 'fare from Adajan to Vesu')."
 
         c, a = predict_fare(origin, destination)
         if c is None:
-            return "Fare not found."
-        return f"Fare from {origin} to {destination} is ₹{c} (child) and ₹{a} (adult)."
+            return f"Sorry, fare information between '{origin or 'unknown stop'}' and '{destination or 'unknown stop'}' was not found in our database."
+        return f"The bus fare from {origin.title()} to {destination.title()} is ₹{c} for children and ₹{a} for adults."
 
     if tag == "route_availability":
         origin, destination = extract_origin_destination(message)
+        if not origin or not destination:
+            return "Please specify the starting and destination stops (e.g., 'buses from Adajan to Vesu')."
         buses = find_direct_buses(origin, destination)
         if buses:
-            return f"Direct buses: {', '.join(map(str, buses))}"
-        return "No direct bus found."
+            return f"Direct buses available from {origin.title()} to {destination.title()}: {', '.join(map(str, buses))}"
+        return f"No direct buses were found between {origin.title()} and {destination.title()}."
 
     for intent in intents["intents"]:
         if intent["tag"] == tag:
             return random.choice(intent["responses"])
 
-    return "Sorry, I didn’t understand that."
+    return "Sorry, I didn’t understand that. You can ask me about bus fares or direct routes between stops!"
 
 # ---------------- Flask Routes ----------------
 @app.route("/")
